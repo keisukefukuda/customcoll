@@ -2,7 +2,7 @@
 
 (defn- default-vector-funcs [type-name args]
   "Returns the default method definitions for vector-compatibe types."
-  (let [ctor (symbol (str "." type-name))
+  (let [ctor (symbol (str type-name "."))
         base-vec (first args)
         base-vec-kw (keyword base-vec)]
     ;; base-vec is a symbol of the first field of the deftype (such as 'nth)
@@ -35,45 +35,44 @@
                               (rseq'# (dec (count ~base-vec)))))
       }))
 
+(defn- fm-func-body [funcmap func-name nargs]
+  (nth (funcmap [func-name nargs]) 2))
+
+(defn- fm-func-args [funcmap func-name nargs]
+  (nth (funcmap [func-name nargs]) 1))
+
+(defn- copy-shared-bodies
+  "funcmap is a map like defined in default-vector-funcmap
+   In custom vector definition, some functions have same meaning and
+   the bodies can be shared.
+   Let the 'shared-body' functions are A, B, and C, and A is actually defined,
+   copy-shared-bodies copy the body of A to B and C.
+   func-list is expected to be a 2-element vector of function name symbol and
+   number of arguments."
+  [funcmap nargs & func-syms]
+  (let [orig-func-sym  (first (filter #(funcmap [% nargs]) func-syms))
+        rest-func-syms (remove #(= % orig-func-sym) func-syms)
+        fargs (fm-func-args funcmap orig-func-sym nargs)
+        fbody (fm-func-body funcmap orig-func-sym nargs)]
+    (if (nil? orig-func-sym)
+      funcmap
+      (loop [rest-func-syms rest-func-syms funcmap funcmap]
+        (let [f (first rest-func-syms)]
+          (cond
+            (empty? rest-func-syms) funcmap
+            (funcmap [f nargs]) (recur (rest rest-func-syms) funcmap) 
+            :else (recur (rest rest-func-syms)
+                         (assoc funcmap [f nargs] (list f fargs fbody)))))))))
+
 (defn- compl-vector-access2-funcs [funcs]
-  ;; In vector implementation, entryAt, nth(2), valAt(2) are identical
-  ;; so we need only one of them.
-  ;; Thus, if any of nth,valAt,entryAt is defined, then we can define
-  ;; the other 2 functions using it.
-  (let [f (cond (funcs ['nth 2]) 'nth
-                (funcs ['valAt 2]) 'valAt
-                (funcs ['entryAt 2]) 'entryAt
-                :else nil)
-        f (symbol (str "." f))]
-    (if (nil? f)
-      funcs ;; the default definitions are used for all of (nth, valAt, entryAt)
-      (loop [gs ['nth 'valAt 'entryAt]
-             funcs funcs]
-        (if (empty? gs)
-          funcs
-          (let [g (first gs)]
-            (if (nil? (funcs [g 2]))
-              (recur (rest gs) (assoc funcs [g 2] `(~g [this# i#] (~f this# i#))))
-              (recur (rest gs) funcs))))))))
+  (copy-shared-bodies funcs 2 'nth 'valAt 'entryAt))
 
 (defn- compl-vector-access3-funcs [funcs]
-  ;; In vector implementation, nth(3), valAt(3) are identical
-  ;; so we need only one of them.
-  (let [f (cond (funcs ['nth 3]) 'nth
-                (funcs ['valAt 3]) 'valAt
-                :else nil)]
-    (if (nil? f)
-      funcs ;; the default definitions are used for all of (nth, valAt, entryAt)
-      (let [f (symbol (str "." f))]
-        (loop [gs ['nth 'valAt]
-               funcs funcs]
-          (if (empty? gs)
-            funcs
-            (let [g (first gs)]
-              (if (nil? (funcs [g 3]))
-                (recur (rest gs) (assoc funcs [g 3] `(~g [this# i# not-found#] (~f this# i# not-found#))))
-                (recur (rest gs) funcs)))))))))
-  
+  (copy-shared-bodies funcs 3 'nth 'valAt))
+
+(defn- compl-vector-assoc-funcs [funcs]
+  (copy-shared-bodies funcs 3 'assoc 'assocN))
+
 (defn- build-vector-def [type-name args funcs]
   (let [base-vec (first args)]
     `(deftype ~type-name ~args
@@ -128,6 +127,7 @@
         (build-vector-def type-name args (->> funcs
                                               compl-vector-access2-funcs
                                               compl-vector-access3-funcs
+                                              compl-vector-assoc-funcs
                                               (merge (default-vector-funcs type-name args))
                                               ))
           
