@@ -41,7 +41,7 @@
 (defn- fm-func-args [funcmap func-name nargs]
   (nth (funcmap [func-name nargs]) 1))
 
-(defn- copy-shared-bodies
+(defn- fm-copy-shared-bodies
   "funcmap is a map like defined in default-vector-funcmap
    In custom vector definition, some functions have same meaning and
    the bodies can be shared.
@@ -65,13 +65,13 @@
                          (assoc funcmap [f nargs] (list f fargs fbody)))))))))
 
 (defn- compl-vector-access2-funcs [funcs]
-  (copy-shared-bodies funcs 2 'nth 'valAt 'entryAt))
+  (fm-copy-shared-bodies funcs 2 'nth 'valAt 'entryAt))
 
 (defn- compl-vector-access3-funcs [funcs]
-  (copy-shared-bodies funcs 3 'nth 'valAt))
+  (fm-copy-shared-bodies funcs 3 'nth 'valAt))
 
 (defn- compl-vector-assoc-funcs [funcs]
-  (copy-shared-bodies funcs 3 'assoc 'assocN))
+  (fm-copy-shared-bodies funcs 3 'assoc 'assocN))
 
 (defn- build-vector-def [type-name args funcs]
   (let [base-vec (first args)]

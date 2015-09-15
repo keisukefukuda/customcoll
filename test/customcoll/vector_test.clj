@@ -7,6 +7,18 @@
   (nth [_ i] (let [n (get content i)]
                (* n n))))
 
+(defn derefable? [x]
+  (instance? clojure.lang.IDeref x))
+
+(defcustomvec MyVec [contents]
+  (nth [this i]
+       (let [v (nth contents i)]
+         (if (derefable? v) @v v)))
+  (nth [this i not-found]
+       (let [v (nth contents i not-found)]
+         (if (derefable? v) @v v))))
+
+
 (deftest TestBasicMethods
   (let [v (SquareVector. [1 2 3])]
     (testing "get"
@@ -59,15 +71,20 @@
              (filter even? v))))))
 
 
-(defcustomvec NegativeRangeVector [contents base]
-  (nth [_ i] (.nth contents (- i base)))
-  (nth [_ i not-found] (.nth contents (- i base) not-found))
-  (assoc [_ i v] (NegativeRangeVector. (.assoc contents (- i base) v) base))
-  (seq [this] (.seq contents))
-  (rseq [this] (.rseq contents)))
+(defcustomvec ShiftRangeVector [contents base]
+  (nth [_ i]
+       (.nth contents (- i base)))
+  (nth [_ i not-found]
+       (.nth contents (- i base) not-found))
+  (assoc [_ i v]
+         (ShiftRangeVector. (.assoc contents (- i base) v) base))
+  (seq [this]
+       (.seq contents))
+  (rseq [this]
+        (.rseq contents)))
 
 (deftest TestNegativeRange
-  (let [v (NegativeRangeVector. [1 2 3] -1)]
+  (let [v (ShiftRangeVector. [1 2 3] -1)]
     (is (= 1 (nth v -1)))
     (is (= 2 (nth v 0)))
     (is (= 3 (nth v 1)))
