@@ -16,6 +16,9 @@
   (assert (is-fn? sym)
           (str "A function is expected but given " sym)))
 
+(defn call-with-opts [f args kwd]
+  (apply f (concat args (flatten (vec kwd)))))
+
 ;; hooks:
 ;; not-found
 ;; empty
@@ -23,26 +26,24 @@
 ;; java.util.Mapをimplement  Map$Entry
 ;; MapEquivalence
 (defn custom-map
-  ([map-data] (custom-map map-data {}))
-  ([map-data opts]
-   (let [{vh :value-hook} opts]
+  ([map-data & {vh :value-hook :as opts}]
+   (letfn [(->normal-map [this] (apply hash-map (flatten (vec this))))]
      (reify
        clojure.lang.Associative
        clojure.lang.IPersistentMap
        (entryAt [this k]
          (if (contains? map-data k)
-           (let [v (map-data k)
-                 v (if vh (vh v) v)]
+           (let [v (.valAt this k)]
              (clojure.lang.MapEntry. k v))
            nil))
-     
+       
        (assoc [this key val]
-         (custom-map (.assoc map-data key val) opts))
+         (merge (->normal-map this) {key val}))
 
        (assocEx [this key val] (throw (Exception. "error")))
        
        (without [this key]
-         (custom-map (.without map-data key) opts))
+         (call-with-opts custom-map [(.without map-data key)] opts))
        
        clojure.lang.IFn
        (invoke [this key]
@@ -50,7 +51,17 @@
        
        clojure.lang.ILookup
        (valAt [this key]
-         (.valAt this key nil))
+         (try
+           (.valAt this key nil)
+           (catch Exception e
+             (let [msg (.getMessage e)]
+               (throw (Exception. (str "custom-map: :value-hook hander threw an exception with key "
+                                       (pr-str key)
+                                       ". Original exception: "
+                                       (-> e type pr-str)
+                                       " : "
+                                       msg)))))))
+       
        
        (valAt [this key not-found]
          (if (contains? map-data key)
@@ -67,14 +78,15 @@
               (loop [ks (keys this)]
                 (if (nil? ks)
                   true
-                  (let [k (first ks)]
-                    (if (= (-> this (.entryAt k) (.getValue))
-                           (-> o (.entryAt k) (.getValue)))
+                  (let [k (first ks)
+                        v (.valAt this k)
+                        ov (.valAt o k)]
+                    (if (= v ov)
                       (recur (next ks))
                       false))))))
-       (cons [_ s]
-         (custom-map (.cons map-data s) opts))
-
+       (cons [this s]
+         (.cons (->normal-map this) s))
+       
        (containsKey [_ key]
          (.containsKey map-data key))
 
@@ -86,15 +98,16 @@
            (size [_] (.count this))
            (contains [_ o]
              (if (instance? java.util.Map$Entry o)
-               (if-let [v (map-data (.getKey o))]
-                 (if (= v (.getValue o))
-                   true
+               (let [k (.getKey o)]
+                 (if (contains? map-data k)
+                   (let [v (.valAt this k)]
+                     (= v (.getValue o)))
                    false)
                  false)
                false))))
        (isEmpty  [this] (zero? (.count this)))
        (size [this] (count map-data))
-       (get [this key] (.get map-data key))
+       (get [this key] (.valAt this key))
        (put [this key val] (throw (UnsupportedOperationException.)))
 
        java.lang.Iterable
@@ -102,15 +115,15 @@
          (let [s (atom (seq this))]
            (reify java.util.Iterator
              (hasNext [this] (not (nil? @s)))
-             (next    [this] (let [v (first @s)]
+             (next    [this] (let [ent (first @s)]
                                (swap! s next)
-                               v))
+                               ent))
              (remove  [this] (throw (UnsupportedOperationException.))))))
 
        clojure.lang.Seqable
-       (seq [_]
-         (map #(let [[k v] %
-                     v (if vh (vh v) v)]
+       (seq [this]
+         (map #(let [[k _] %
+                     v (.valAt this k)]
                  (clojure.lang.MapEntry. k v))
               map-data))
        
@@ -122,8 +135,6 @@
 
 (defn zipmapf [ks f] (zipmap ks (map f)))
 
-;; reifyを使った形式が、筋が良いかも
-;;
 ;; (custom-map (zipmap keys (map f keys))
 ;;
 ;; (custom-map (zipmapf keys f) {...})
@@ -131,126 +142,3 @@
 ;; (custom-map {}
 ;;             {:val-filter vf}
 ;;             (toString [_] )
-;; 
-;; Mapのequivについて調べる必要がある？equivalenceはどう実装されるのか？
-;;   * hash-mapとarray-mapは、=で比較すれば等価だろうが、.equivで比較するとどうか？
-;;   * APersistentMap::equiv() で用いられているのはどのような実装か？
-;;   * clojure.core/= では具体的にどのように比較が実装されるか？
-;;
-;; .cons/assoc 等はどう実装されるべきか？
-;; 目的を考えると･･･どうなるか。とりあえずpaperknifeを基準に考えると、望ましい動作はどうなるか？
-;; (def ^:dynamic *print-ref*)
-;; key-filter, val-filterを考えると、JoinMap的なものを返すべきか
-;;
-;; さらに、toString的なやつを実装するためにはどうすればよいのか？それを => toStringメソッド
-;; この機能として実装することができるか？
-;;
-
-(deftype MyMap1 [ks f]
-  clojure.lang.Associative
-  clojure.lang.IPersistentMap
-  (entryAt [this k]
-    (if (some #{k} ks)
-      (reify clojure.lang.IMapEntry
-        (key [this] k)
-        (val [this] (f k)))
-      nil))
-
-  (assoc [this key val]
-    this)
-
-  (assocEx [this key val] (throw (Exception. "error")))
-
-  (without [this key]
-    this)
-
-  clojure.lang.IFn
-  (invoke [this k]
-    (let [v (.valAt this k)]
-      v))
-
-  clojure.lang.ILookup
-  (valAt [this k]
-    (if (some #{k} ks)
-      (f k)
-      nil))
-
-  (valAt [this k not-found]
-    (if (some #{k} ks)
-      (.valAt this k)
-      not-found))
-
-  clojure.lang.IPersistentCollection
-  (count [_] (.count ks))
-  (empty [_] (.empty ks))
-  (equiv [this o]
-    (and (instance? o MyMap1)
-         (= (keys o) ks)
-         (= (vals o) (map f keys))))
-
-  (cons [_ v] _)
-
-  java.lang.Iterable
-  (iterator [this]
-    (let [s (seq this)]
-      (reify java.util.Iterator
-        (hasNext [this] (.hasNext s))
-        (next    [this] (.next s))
-        (remove  [this] (.remove s)))))
-
-  clojure.lang.Seqable
-  (seq [_] (map #(reify java.util.Map$Entry
-                   (getKey [_] %)
-                   (getValue [_] (f %)))
-                ks))
-
-  clojure.lang.Reversible
-  (rseq [_] (reverse (seq _))))
-
-
-(deftype MyMap [content]
-  clojure.lang.Associative
-  clojure.lang.IPersistentMap
-
-  (entryAt [_ key]
-    (.entryAt content key))
-  (assoc [_ key val]
-    (MyMap. (.assoc content key val)))
-
-  (assocEx [_ val val]
-    (throw (Exception. "error")))
-
-  (without [_ val]
-    (MyMap. (.without content val)))
-
-  clojure.lang.ILookup
-  (valAt [_ key]
-    (.valAt content key))
-  (valAt [_ key not-found]
-    (.valAt content not-found))
-
-  clojure.lang.IPersistentCollection
-  (count [_]
-    (.count content))
-  (empty [_]
-    (.empty content))
-  (equiv [_ o]
-    (and (instance? o MyMap)
-         (.equiv content o)))
-  (cons [_ v]
-    (MyMap. (.cons content v)))
-
-  java.lang.Iterable
-  (iterator [this]
-    (let [s (seq this)]
-      (reify java.util.Iterator
-        (hasNext [this] (.hasNext s))
-        (next    [this] (.next s))
-        (remove  [this] (.remove s)))))
-
-  clojure.lang.Seqable
-  (seq [_] (seq '((1 2) (3 4))))
-
-  clojure.lang.Reversible
-  (rseq [_] (reverse (seq _)))
-  )
