@@ -42,7 +42,7 @@
        (assocEx [this key val] (throw (Exception. "error")))
        
        (without [this key]
-         (custom-map (.without map-data opts)))
+         (custom-map (.without map-data key) opts))
        
        clojure.lang.IFn
        (invoke [this key]
@@ -62,7 +62,16 @@
        (count [_] (.count map-data))
        (empty [_] (.empty map-data))
        (equiv [this o]
-         (.equiv o this))
+         (and (= (.size this) (.size o))
+              (= (keys this) (keys this))
+              (loop [ks (keys this)]
+                (if (nil? ks)
+                  true
+                  (let [k (first ks)]
+                    (if (= (-> this (.entryAt k) (.getValue))
+                           (-> o (.entryAt k) (.getValue)))
+                      (recur (next ks))
+                      false))))))
        (cons [_ s]
          (custom-map (.cons map-data s) opts))
 
