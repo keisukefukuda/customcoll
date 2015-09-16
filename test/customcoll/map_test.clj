@@ -18,7 +18,10 @@
     (is (= m (array-map 1 2 3 4)))
     (is (= [[1 2] [3 4]] (seq m)))
     (is (= (seq m) [[1 2] [3 4]]))
-    
+
+    (is (= 2 (count (assoc m 3 99))))
+    (is (= 2 (.size (assoc m 3 99))))
+
     ;; get/get-in
     (is (= 2 (m 1)))
     (is (= 2 (get m 1)))
@@ -44,6 +47,7 @@
     ;; assoc
     (is (= 'foo ((assoc m 3 'foo) 3)))
     (is (= {1 2 3 99} (assoc m 3 99)))
+    (is (= (assoc m 3 99) {1 2 3 99}))
 
     ;; reduce-kv
     (is (= 6 (reduce-kv (fn [acc k v] (+ acc v)) 0 m))) ;; reduce(+) on values
